@@ -1,5 +1,5 @@
 import $ from 'jquery';
-
+import api from './api';
 import store from './store';
 
 const generateItemElement = function (item) {
@@ -31,18 +31,33 @@ const generateShoppingItemsString = function (shoppingList) {
   return items.join('');
 };
 
+const generateError = function(error){
+  if (error.message) {
+    return `
+    <p>${error.message}</p>
+    `;
+  } else {
+    return '';
+  }
+};
+
+const resetError = function() {
+  store.error.message = null;
+  store.error.code = null;
+};
+
 const render = function () {
   // Filter item list if store prop is true by item.checked === false
   let items = [...store.items];
   if (store.hideCheckedItems) {
     items = items.filter(item => !item.checked);
   }
-
+  const errorString = generateError(store.error);
   // render the shopping list in the DOM
   const shoppingListItemsString = generateShoppingItemsString(items);
-
   // insert that HTML into the DOM
-  $('.js-shopping-list').html(shoppingListItemsString);
+  $('.js-shopping-list').html(errorString + shoppingListItemsString);
+  resetError();
 };
 
 const handleNewItemSubmit = function () {
@@ -50,8 +65,26 @@ const handleNewItemSubmit = function () {
     event.preventDefault();
     const newItemName = $('.js-shopping-list-entry').val();
     $('.js-shopping-list-entry').val('');
-    store.addItem(newItemName);
-    render();
+    api.createItem(newItemName)
+      .then(res => {
+        if (!res.ok){
+          store.error.code = res.status;
+        }
+        return res.json();
+      })
+      .then((newItem) => {
+        if (store.error.code) {
+          store.error.message= newItem.message;
+          return Promise.reject(store.error);
+        } else {
+          store.addItem(newItem);
+          render();
+        }
+      })
+      .catch(err => {
+        store.error.message = err.message;
+        render();
+      });
   });
 };
 
@@ -67,9 +100,25 @@ const handleDeleteItemClicked = function () {
     // get the index of the item in store.items
     const id = getItemIdFromElement(event.currentTarget);
     // delete the item
-    store.findAndDelete(id);
-    // render the updated shopping list
-    render();
+    api.deleteItem(id)
+      .then((res)=> {
+        if (!res.ok){
+          store.error.code = res.status;
+          return res.json();
+        } else {
+          store.findAndDelete(id);
+          render();
+        }
+      })
+      .then(data => {
+        if (store.error.code){
+          store.error.message = data.message;
+          return Promise.reject(store.error);
+        }})
+      .catch(err => {
+        store.error.message = err.message;
+        render();
+      });
   });
 };
 
@@ -78,16 +127,43 @@ const handleEditShoppingItemSubmit = function () {
     event.preventDefault();
     const id = getItemIdFromElement(event.currentTarget);
     const itemName = $(event.currentTarget).find('.shopping-item').val();
-    store.findAndUpdateName(id, itemName);
-    render();
+    const updated = {name: itemName};
+    api.updateItem(id, updated)
+      .then((res)=> {
+        if (!res.ok){
+          store.error.code = res.status;
+          return res.json();
+        } else {
+          store.findAndUpdate(id, updated);
+          render();
+        }
+      })
+      .then(data => {
+        if (store.error.code){
+          store.error.message = data.message;
+          return Promise.reject(store.error);
+        }})
+      .catch(err => {
+        store.error.message = err.message;
+        render();
+      });
   });
 };
 
 const handleItemCheckClicked = function () {
   $('.js-shopping-list').on('click', '.js-item-toggle', event => {
     const id = getItemIdFromElement(event.currentTarget);
-    store.findAndToggleChecked(id);
-    render();
+    const obj = store.findById(id);
+    const updated = {checked: !obj.checked};
+    api.updateItem(id, updated)
+      .then(() => {
+        store.findAndUpdate(id, updated);
+        render();
+      })
+      .catch(err => {
+        store.error.message = err.message;
+        render();
+      });
   });
 };
 
